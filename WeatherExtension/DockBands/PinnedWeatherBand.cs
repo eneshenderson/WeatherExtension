@@ -8,6 +8,7 @@ using Microsoft.CmdPal.Ext.Weather.Pages;
 using Microsoft.CmdPal.Ext.Weather.Services;
 using Microsoft.CommandPalette.Extensions;
 using Microsoft.CommandPalette.Extensions.Toolkit;
+using System.Globalization;
 using Timer = System.Timers.Timer;
 
 namespace Microsoft.CmdPal.Ext.Weather.DockBands;
@@ -19,7 +20,6 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 	private readonly WeatherSettingsManager _settings;
 	private readonly WeatherBandCard _contentPage;
 	private readonly Timer _updateTimer;
-	private readonly CancellationTokenSource _cts = new();
 	private bool _isDisposed;
 	private int _isUpdating;
 
@@ -38,7 +38,7 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 
 		Command = _contentPage;
 		Icon = Icons.WeatherIcon;
-		Title = Resources.loading;
+		Title = Resources.dock_band_loading;
 		Subtitle = _location.DisplayName;
 
 		var intervalMs = _settings.UpdateIntervalMinutes * 60 * 1000;
@@ -64,15 +64,19 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 				_location.Latitude,
 				_location.Longitude,
 				_settings.TemperatureUnit,
-				_settings.WindSpeedUnit,
-				_cts.Token);
+				_settings.WindSpeedUnit);
 
 			if (weather?.Current != null)
 			{
-				var unit = _settings.TemperatureUnit == "celsius" ? "°C" : "°F";
-				var condition = Icons.GetWeatherDescription(weather.Current.WeatherCode);
-				Title = $"{weather.Current.Temperature:F0}{unit} {condition}";
-				Icon = Icons.GetIconForWeatherCode(weather.Current.WeatherCode);
+				var tempUnit = _settings.TemperatureUnit;
+				var current = weather.Current;
+				var condition = Icons.GetWeatherDescription(current.WeatherCode);
+				Title = string.Format(
+					CultureInfo.CurrentCulture,
+					"{0} {1}",
+					WeatherFormatter.Temperature(current.Temperature, tempUnit),
+					condition);
+				Icon = Icons.GetIconForWeatherCode(current.WeatherCode);
 
 				if (DockItem is CommandItem dockCommandItem)
 				{
@@ -84,15 +88,20 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 					var forecast = await _weatherService.GetForecastAsync(
 						_location.Latitude,
 						_location.Longitude,
-						_settings.TemperatureUnit,
-						_cts.Token);
+						tempUnit);
 
 					if (forecast?.Daily?.TemperatureMax?.Count > 0 &&
 						forecast.Daily.TemperatureMin?.Count > 0)
 					{
 						var high = forecast.Daily.TemperatureMax[0];
 						var low = forecast.Daily.TemperatureMin[0];
-						Subtitle = $"H: {high:F0}{unit}  L: {low:F0}{unit}";
+						Subtitle = string.Format(
+							CultureInfo.CurrentCulture,
+							"{0} {1}  {2} {3}",
+							Resources.high,
+							WeatherFormatter.Temperature(high, tempUnit),
+							Resources.low,
+							WeatherFormatter.Temperature(low, tempUnit));
 					}
 					else
 					{
@@ -123,7 +132,7 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 				MessageState.Error,
 				$"Pinned band weather network error: {ex.Message}");
 
-			if (Title == Resources.loading)
+			if (Title == Resources.dock_band_loading)
 			{
 				Title = "--";
 				Subtitle = $"{_location.DisplayName} — {Resources.network_error}";
@@ -135,7 +144,7 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 				MessageState.Error,
 				$"Pinned band weather update error: {ex.Message}");
 
-			if (Title == Resources.loading)
+			if (Title == Resources.dock_band_loading)
 			{
 				Title = "--";
 				Subtitle = $"{_location.DisplayName} — {Resources.unavailable}";
@@ -156,12 +165,10 @@ internal sealed partial class PinnedWeatherBand : ListItem, IDisposable
 	{
 		if (!_isDisposed)
 		{
-			_cts.Cancel();
 			_isDisposed = true;
 			_settings.Settings.SettingsChanged -= OnSettingsChanged;
 			_updateTimer?.Stop();
 			_updateTimer?.Dispose();
-			_cts.Dispose();
 		}
 	}
 }
